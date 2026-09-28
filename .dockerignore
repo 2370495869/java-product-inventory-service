@@ -1,0 +1,13 @@
+.git
+.idea
+.vscode
+.env
+.env.*
+target
+data
+uploads
+logs
+screenshots
+docs
+*.class
+src/main/java/**/lab1/

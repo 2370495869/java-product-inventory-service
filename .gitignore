@@ -1,0 +1,15 @@
+/target/
+*.class
+.idea/
+.vscode/
+.DS_Store
+.env
+.env.*
+/data/
+/uploads/
+/logs/
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.log
