@@ -1,4 +1,5 @@
 FROM eclipse-temurin:21-jdk AS build
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 COPY . .
 RUN chmod +x mvnw && ./mvnw -B -ntp -DskipTests package

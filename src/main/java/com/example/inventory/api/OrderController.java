@@ -1,6 +1,7 @@
 package com.example.inventory.api;
 
 import com.example.inventory.application.OrderService;
+import com.example.inventory.domain.OrderStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -32,6 +34,15 @@ public class OrderController {
             @Valid @RequestBody Requests.CreateOrder request) {
         Views.OrderResult result = orders.create(idempotencyKey, request);
         return ResponseEntity.status(result.replayed() ? 200 : 201).body(result.order());
+    }
+
+    @GetMapping
+    @Operation(summary = "分页查询订单")
+    public Views.Page<Views.Order> page(
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return orders.page(status, page, size);
     }
 
     @GetMapping("/{orderId}")

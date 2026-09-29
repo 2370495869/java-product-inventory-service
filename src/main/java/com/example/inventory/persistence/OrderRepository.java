@@ -1,5 +1,6 @@
 package com.example.inventory.persistence;
 
+import com.example.inventory.domain.OrderStatus;
 import com.example.inventory.domain.SaleMode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -11,8 +12,10 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Repository
 public class OrderRepository {
@@ -51,6 +54,51 @@ public class OrderRepository {
                 SELECT order_id, idempotency_key, request_hash, status, created_at, updated_at
                 FROM orders WHERE order_id = ? FOR UPDATE
                 """, HEADER_MAPPER, orderId).stream().findFirst();
+    }
+
+    public List<Header> page(OrderStatus status, int offset, int size) {
+        if (status == null) {
+            return jdbc.query("""
+                    SELECT order_id, idempotency_key, request_hash, status, created_at, updated_at
+                    FROM orders
+                    ORDER BY created_at DESC, order_id DESC
+                    LIMIT ? OFFSET ?
+                    """, HEADER_MAPPER, size, offset);
+        }
+        return jdbc.query("""
+                SELECT order_id, idempotency_key, request_hash, status, created_at, updated_at
+                FROM orders WHERE status = ?
+                ORDER BY created_at DESC, order_id DESC
+                LIMIT ? OFFSET ?
+                """, HEADER_MAPPER, status.name(), size, offset);
+    }
+
+    public long count(OrderStatus status) {
+        if (status == null) {
+            Long total = jdbc.queryForObject("SELECT count(*) FROM orders", Long.class);
+            return total == null ? 0 : total;
+        }
+        Long total = jdbc.queryForObject("SELECT count(*) FROM orders WHERE status = ?",
+                Long.class, status.name());
+        return total == null ? 0 : total;
+    }
+
+    public Map<UUID, List<Line>> items(List<UUID> orderIds) {
+        if (orderIds.isEmpty()) {
+            return Map.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(orderIds.size(), "?"));
+        List<OrderLine> rows = jdbc.query("""
+                SELECT order_id, product_id, product_name, sale_mode, quantity, unit_price
+                FROM order_items
+                WHERE order_id IN (%s)
+                ORDER BY order_id, product_id
+                """.formatted(placeholders),
+                (rs, row) -> new OrderLine(rs.getObject("order_id", UUID.class), mapLine(rs, row)),
+                orderIds.toArray());
+        return rows.stream().collect(Collectors.groupingBy(
+                OrderLine::orderId, java.util.LinkedHashMap::new,
+                Collectors.mapping(OrderLine::line, Collectors.toList())));
     }
 
     public void insertItem(UUID orderId, String productId, String productName,
@@ -96,4 +144,6 @@ public class OrderRepository {
 
     public record Line(String productId, String productName, SaleMode saleMode,
                        int quantity, BigDecimal unitPrice) {}
+
+    private record OrderLine(UUID orderId, Line line) {}
 }

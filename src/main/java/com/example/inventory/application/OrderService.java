@@ -4,6 +4,7 @@ import com.example.inventory.api.Requests;
 import com.example.inventory.api.Views;
 import com.example.inventory.domain.ApiException;
 import com.example.inventory.domain.InventoryState;
+import com.example.inventory.domain.OrderStatus;
 import com.example.inventory.domain.SaleMode;
 import com.example.inventory.persistence.InventoryRepository;
 import com.example.inventory.persistence.OrderRepository;
@@ -100,6 +101,19 @@ public class OrderService {
         return toView(header);
     }
 
+    @Transactional(readOnly = true)
+    public Views.Page<Views.Order> page(OrderStatus status, int page, int size) {
+        int offset = PageSupport.offset(page, size);
+        List<OrderRepository.Header> headers = orders.page(status, offset, size);
+        Map<UUID, List<OrderRepository.Line>> items = orders.items(
+                headers.stream().map(OrderRepository.Header::orderId).toList());
+        List<Views.Order> result = headers.stream()
+                .map(header -> toView(header, items.getOrDefault(header.orderId(), List.of())))
+                .toList();
+        long total = orders.count(status);
+        return new Views.Page<>(result, page, size, total, PageSupport.totalPages(total, size));
+    }
+
     @Transactional
     public Views.Order cancel(String id) {
         UUID orderId = parseId(id);
@@ -139,9 +153,13 @@ public class OrderService {
     }
 
     private Views.Order toView(OrderRepository.Header header) {
+        return toView(header, orders.items(header.orderId()));
+    }
+
+    private Views.Order toView(OrderRepository.Header header, List<OrderRepository.Line> lines) {
         List<Views.OrderItem> items = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO.setScale(2);
-        for (OrderRepository.Line line : orders.items(header.orderId())) {
+        for (OrderRepository.Line line : lines) {
             BigDecimal lineTotal = line.unitPrice().multiply(BigDecimal.valueOf(line.quantity()));
             total = total.add(lineTotal);
             items.add(new Views.OrderItem(line.productId(), line.productName(), line.saleMode(),

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -16,6 +17,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +30,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryWorkflowTest {
     private static final String DATABASE_PASSWORD = UUID.randomUUID().toString();
 
@@ -60,6 +67,11 @@ class InventoryWorkflowTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private Environment environment;
+
+    private final HttpClient http = HttpClient.newHttpClient();
 
     @BeforeEach
     void clearDatabase() {
@@ -150,6 +162,57 @@ class InventoryWorkflowTest {
         assertEquals("CANCELLED", orders.cancel(reserved.orderId()).status());
         assertEquals(0, inventory.get("PRESALE").presaleReservedQuantity());
         assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ORDER_CANCELLED'"));
+    }
+
+    @Test
+    void orderHistoryIsPagedFilterableAndKeepsTheOrderLookupRoute() throws Exception {
+        createProduct("HISTORY_A", 5, SaleMode.REGULAR, null);
+        createProduct("HISTORY_B", 5, SaleMode.REGULAR, null);
+        Views.Order first = orders.create("history-a", order("HISTORY_A", 2)).order();
+        Views.Order second = orders.create("history-b", order("HISTORY_B", 1)).order();
+        orders.cancel(first.orderId());
+
+        HttpResponse<String> pageOne = get("/api/orders?page=0&size=1");
+        HttpResponse<String> pageTwo = get("/api/orders?page=1&size=1");
+        assertEquals(200, pageOne.statusCode());
+        assertEquals(200, pageTwo.statusCode());
+        assertTrue(pageOne.body().contains("\"totalElements\":2"));
+        assertTrue(pageOne.body().contains("\"totalPages\":2"));
+        String firstPageOrderId = orderIdOnPage(pageOne.body());
+        String secondPageOrderId = orderIdOnPage(pageTwo.body());
+        assertFalse(firstPageOrderId.equals(secondPageOrderId));
+        assertTrue(List.of(first.orderId(), second.orderId())
+                .containsAll(List.of(firstPageOrderId, secondPageOrderId)));
+
+        HttpResponse<String> reserved = get("/api/orders?status=RESERVED");
+        HttpResponse<String> cancelled = get("/api/orders?status=CANCELLED");
+        assertTrue(reserved.body().contains("\"totalElements\":1"));
+        assertTrue(cancelled.body().contains("\"totalElements\":1"));
+        assertTrue(reserved.body().contains(second.orderId()));
+        assertTrue(cancelled.body().contains(first.orderId()));
+        assertEquals(400, get("/api/orders?status=PAID").statusCode());
+
+        HttpResponse<String> detail = get("/api/orders/" + first.orderId());
+        assertEquals(200, detail.statusCode());
+        assertTrue(detail.body().contains("\"orderId\":\"" + first.orderId() + "\""));
+        assertTrue(detail.body().contains("\"status\":\"CANCELLED\""));
+        assertTrue(detail.body().contains("\"items\":[{"));
+
+        HttpResponse<String> emptyPage = get("/api/orders?page=10&size=1");
+        assertEquals(200, emptyPage.statusCode());
+        assertTrue(emptyPage.body().contains("\"items\":[]"));
+    }
+
+    private HttpResponse<String> get(String path) throws Exception {
+        Integer port = environment.getRequiredProperty("local.server.port", Integer.class);
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).GET().build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static String orderIdOnPage(String body) {
+        Matcher matcher = Pattern.compile("\\\"orderId\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").matcher(body);
+        assertTrue(matcher.find());
+        return matcher.group(1);
     }
 
     @Test
