@@ -19,4 +19,13 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Build
-        run: ./mvnw -B -ntp verify
+        run: ./mvnw -B -ntp clean verify
+      - name: Verify packaged artifact excludes legacy lab classes
+        shell: bash
+        run: |
+          artifact="target/java-product-inventory-service.jar"
+          test -f "$artifact"
+          if jar tf "$artifact" | grep -q '^BOOT-INF/classes/com/shaoyun/'; then
+            echo "::error::Legacy lab classes must not be packaged in the service artifact"
+            exit 1
+          fi

@@ -67,15 +67,16 @@ PowerShell 命令相同。确认健康端点返回 `{"status":"UP"}` 后即可�
 ## 本机 Maven 构建与测试
 
 只需安装 JDK 21；Maven Wrapper 会下载并校验固定版本的 Maven。Testcontainers 集成测试需要 Docker，Docker 不可用时该测试类会跳过；无 Docker 环境仍会运行普通单元测试。
+使用 `clean` 可先移除旧构建输出；CI 还会检查可执行 JAR，确保保留的 `com/shaoyun/` 旧实验类没有混入服务产物。
 
 ```sh
-./mvnw -B -ntp verify
+./mvnw -B -ntp clean verify
 ```
 
 Windows PowerShell：
 
 ```powershell
-.\mvnw.cmd -B -ntp verify
+.\mvnw.cmd -B -ntp clean verify
 ```
 
 如果已有外部 PostgreSQL，也可以直接运行应用：
